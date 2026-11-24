@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AMENITIES, CONTACT, GALLERY, M, NEARBY, ORIGIN_PIN, PROJECT, TRACK_RECORD, waLink } from '../data/project';
-import { INVENTORY, STATUS_META, TYPOLOGIES, fmtUSD, type Typology } from '../data/units';
+import { INVENTORY, TYPOLOGIES, fmtUSD, type Typology } from '../data/units';
 import { useCountUp, useInView } from '../lib/hooks';
 import LeadModal, { LeadForm } from './LeadModal';
+import ScrollFilm from './ScrollFilm';
 
 const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -11,14 +12,6 @@ function Reveal({ children, delay = 0, className = '' }: { children: React.React
   return (
     <div ref={ref} className={`reveal ${seen ? 'in' : ''} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
       {children}
-    </div>
-  );
-}
-
-function HeroScene() {
-  return (
-    <div className="hero-canvas hero-photo">
-      <img src={M('tower-entrance.webp')} alt="Macororó 16 | 17 — acceso principal sobre Av. Beni" />
     </div>
   );
 }
@@ -37,7 +30,6 @@ export default function Landing() {
   const [scrolled, setScrolled] = useState(false);
   const [lead, setLead] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [night, setNight] = useState(false);
   const [place, setPlace] = useState(NEARBY[0].id);
   const [statsRef, statsSeen] = useInView<HTMLDivElement>(0.3);
 
@@ -45,16 +37,6 @@ export default function Landing() {
     const on = () => setScrolled(window.scrollY > 40);
     window.addEventListener('scroll', on, { passive: true });
     return () => window.removeEventListener('scroll', on);
-  }, []);
-  useEffect(() => {
-    const t = setInterval(() => setNight((n) => !n), 3800);
-    return () => clearInterval(t);
-  }, []);
-
-  const counts = useMemo(() => {
-    const c = { disponible: 0, reservado: 0, vendido: 0 };
-    INVENTORY.forEach((u) => c[u.status]++);
-    return c;
   }, []);
 
   const typo = useMemo(
@@ -88,40 +70,7 @@ export default function Landing() {
         </div>
       </nav>
 
-      {/* HERO */}
-      <header className="hero">
-        <HeroScene />
-        <div className="hero-copy">
-          <div className="mono dot">Macororó 16 | 17 · City Park · Santa Cruz</div>
-          <h1 className="display">
-            El ícono de <span className="l2">las alturas.</span>
-          </h1>
-          <p className="lead">{PROJECT.intro}</p>
-          <div className="hero-actions">
-            <a className="btn btn-green" href="#/explorar">Explorar disponibilidad <span className="arrow">→</span></a>
-            <button className="btn btn-ghost" onClick={() => setLead(true)}>Agendar visita</button>
-          </div>
-          <div className="hero-meta">
-            <div><strong>37</strong><span>pisos por torre</span></div>
-            <div><strong>2</strong><span>torres + puente estructural</span></div>
-            <div><strong>1–4</strong><span>dormitorios</span></div>
-            <div><strong>2 MIN</strong><span>al Cristo Redentor</span></div>
-          </div>
-        </div>
-        <div className="hero-chip">
-          <div className="mono" style={{ color: 'var(--muted)', marginBottom: 6 }}>Disponibilidad en vivo</div>
-          {(['disponible', 'reservado', 'vendido'] as const).map((s) => (
-            <div className="row" key={s}>
-              <span><i className="legend-dot" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}</span>
-              <b>{counts[s]}</b>
-            </div>
-          ))}
-          <a href="#/explorar?modo=residencias&solo=1" className="btn btn-sm" style={{ marginTop: 8, background: 'var(--ink)', color: '#fff', width: '100%', justifyContent: 'center' }}>
-            Ver disponibles →
-          </a>
-        </div>
-        <div className="hero-hint mono">Fotografía real · disponibilidad en vivo</div>
-      </header>
+      <ScrollFilm onVisit={() => setLead(true)} />
 
       {/* TYPOLOGIES */}
       <section className="section" id="s-deptos" style={{ background: 'var(--ink-2)' }}>
@@ -185,14 +134,12 @@ export default function Landing() {
           {AMENITIES.map((a, i) => (
             <Reveal key={a.id} delay={(i % 3) * 90}>
               <a className="amen-card" href={`#/explorar?modo=amenidades&a=${a.id}`} style={{ display: 'block' }}>
-                <img src={a.img} alt={a.name} loading="lazy" style={{ opacity: a.night && night ? 0 : 1 }} />
-                {a.night && <img src={a.night} alt="" loading="lazy" style={{ opacity: night ? 1 : 0 }} />}
-                {a.night && (
-                  <div className="toggle" onClick={(e) => e.preventDefault()}>
-                    <button className={!night ? 'on' : ''} onClick={() => setNight(false)}>Día</button>
-                    <button className={night ? 'on' : ''} onClick={() => setNight(true)}>Noche</button>
-                  </div>
+                {a.clip ? (
+                  <video src={a.clip} poster={a.img} autoPlay muted loop playsInline preload="metadata" />
+                ) : (
+                  <img src={a.img} alt={a.name} loading="lazy" />
                 )}
+                {a.clip && <span className="toggle mono" style={{ padding: '6px 10px', fontSize: 10 }}>● Video real</span>}
                 <div className="in">
                   <h3>{a.name}</h3>
                   <p>{a.desc}</p>

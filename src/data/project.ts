@@ -54,6 +54,7 @@ export type Amenity = {
   short: string;
   img: string;
   night?: string;
+  clip?: string; // real footage loop
   desc: string;
   // hotspot position on masterplan.webp in % (x, y)
   spot: [number, number];
@@ -64,49 +65,55 @@ export const AMENITIES: Amenity[] = [
     id: 'piscina',
     name: 'Piscina atemperada',
     short: 'Piscina',
+    clip: M('clips/piscina.mp4'),
     img: M('pool-indoor.webp'),
     night: M('pool-night.webp'),
-    desc: 'Carril de nado climatizado con muros de mármol retroiluminado y deck exterior.',
+    desc: 'Piscina climatizada interior con ventanales de piso a techo y luz natural.',
     spot: [63, 52],
   },
   {
     id: 'spa',
-    name: 'Lounge & spa',
+    name: 'Sauna & jacuzzi',
     short: 'Spa',
+    clip: M('clips/spa.mp4'),
     img: M('spa.webp'),
-    desc: 'Piscina interior con chimenea, madera natural y camastros tejidos.',
+    desc: 'Sauna, jacuzzi y carril de nado bajo iluminación cálida.',
     spot: [70, 48],
   },
   {
     id: 'deck',
-    name: 'Deck panorámico',
-    short: 'Deck',
+    name: 'Piscina infinita',
+    short: 'Piscina infinita',
+    clip: M('clips/deck.mp4'),
     img: M('lap-pool.webp'),
-    desc: 'Piscina de borde con cascada y luz natural todo el día.',
+    desc: 'Piscina al aire libre en el podio, con la ciudad de fondo.',
     spot: [34, 56],
   },
   {
     id: 'gimnasio',
     name: 'Gimnasio equipado',
     short: 'Gimnasio',
+    clip: M('clips/gimnasio.mp4'),
     img: M('gym.webp'),
-    desc: 'Cardio, pesas y área funcional con vista a la vegetación.',
+    desc: 'Cardio, pesas y área funcional con vista a la ciudad.',
     spot: [69, 65],
   },
   {
     id: 'playroom',
-    name: 'Play room',
-    short: 'Play room',
+    name: 'Parque infantil & terraza',
+    short: 'Parque infantil',
+    clip: M('clips/playroom.mp4'),
     img: M('playroom.webp'),
-    desc: 'Un mundo para los más chicos, con jardín y luz natural.',
+    desc: 'Juegos para los más chicos y terraza verde en el podio.',
     spot: [78, 55],
   },
   {
     id: 'eventos',
-    name: 'Salón de eventos & churrasquera',
+    name: 'Churrasquera & salón de eventos',
     short: 'Eventos',
+    clip: M('clips/eventos.mp4'),
     img: M('social.webp'),
-    desc: 'Cocina social, mesa comunal y barra para recibir sin límites.',
+    desc: 'Churrasquera cerrada y mesa comunal para recibir sin límites.',
     spot: [37, 27],
   },
 ];
