@@ -11,7 +11,7 @@ export default function App() {
   }, [route.page]);
   if (route.page === 'explorar')
     return (
-      <Suspense fallback={<div className="ex"><div className="ex-loading"><span className="mono dot">Cargando explorador 3D</span></div></div>}>
+      <Suspense fallback={<div className="ex"><div className="ex-loading"><span className="mono dot">Cargando explorador</span></div></div>}>
         <Explorer params={route.params} />
       </Suspense>
     );

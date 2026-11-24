@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AMENITIES, CONTACT, GALLERY, M, NEARBY, ORIGIN_PIN, PROJECT, TRACK_RECORD, waLink } from '../data/project';
 import { INVENTORY, STATUS_META, TYPOLOGIES, fmtUSD, type Typology } from '../data/units';
-import { go, useCountUp, useInView } from '../lib/hooks';
-import type { TowerScene } from '../three/TowerScene';
+import { useCountUp, useInView } from '../lib/hooks';
 import LeadModal, { LeadForm } from './LeadModal';
 
 const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -17,27 +16,11 @@ function Reveal({ children, delay = 0, className = '' }: { children: React.React
 }
 
 function HeroScene() {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    let scene: TowerScene | null = null;
-    let alive = true;
-    import('../three/TowerScene').then(({ TowerScene }) => {
-      if (!alive || !ref.current) return;
-      scene = new TowerScene(ref.current, INVENTORY);
-      scene.setHour(17.9);
-      scene.setColorFn((u) => STATUS_META[u.status].color);
-      scene.camera.position.set(40, 20, 66);
-      if (window.innerWidth > 900) scene.setFrameOffset(0.2);
-      scene.setAutoRotate(true);
-      scene.setEmbedded(window.matchMedia('(pointer: coarse)').matches);
-      scene.onPick((u) => u && go(`#/explorar?unidad=${u.id}`));
-    });
-    return () => {
-      alive = false;
-      scene?.dispose();
-    };
-  }, []);
-  return <div className="hero-canvas" ref={ref} />;
+  return (
+    <div className="hero-canvas hero-photo">
+      <img src={M('tower-entrance.webp')} alt="Macororó 16 | 17 — acceso principal sobre Av. Beni" />
+    </div>
+  );
 }
 
 function Stat({ value, decimals, label, run }: { value: number; decimals: number; label: string; run: boolean }) {
@@ -101,7 +84,7 @@ export default function Landing() {
         </div>
         <div className="nav-cta">
           <button className="btn btn-ghost btn-sm" onClick={() => setLead(true)}>Agendar visita</button>
-          <a className="btn btn-green btn-sm" href="#/explorar">Explorar 3D <span className="arrow">→</span></a>
+          <a className="btn btn-green btn-sm" href="#/explorar">Explorar <span className="arrow">→</span></a>
         </div>
       </nav>
 
@@ -115,7 +98,7 @@ export default function Landing() {
           </h1>
           <p className="lead">{PROJECT.intro}</p>
           <div className="hero-actions">
-            <a className="btn btn-green" href="#/explorar">Explorar disponibilidad en 3D <span className="arrow">→</span></a>
+            <a className="btn btn-green" href="#/explorar">Explorar disponibilidad <span className="arrow">→</span></a>
             <button className="btn btn-ghost" onClick={() => setLead(true)}>Agendar visita</button>
           </div>
           <div className="hero-meta">
@@ -137,7 +120,7 @@ export default function Landing() {
             Ver disponibles →
           </a>
         </div>
-        <div className="hero-hint mono">Arrastrá para girar · clic en un depto</div>
+        <div className="hero-hint mono">Fotografía real · disponibilidad en vivo</div>
       </header>
 
       {/* TYPOLOGIES */}
@@ -292,7 +275,7 @@ export default function Landing() {
         <div>
           <h4>Proyecto</h4>
           <div style={{ display: 'grid', gap: 6 }}>
-            <a href="#/explorar">Explorador 3D</a>
+            <a href="#/explorar">Explorador en vivo</a>
             <a href="#/explorar?modo=residencias">Disponibilidad</a>
             <a href="#/explorar?modo=amenidades">Amenidades</a>
             <a href="#/explorar?modo=ubicacion">Ubicación</a>

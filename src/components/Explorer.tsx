@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AMENITIES, M, NEARBY, ORIGIN_PIN, PROJECT, waLink } from '../data/project';
 import {
   DEFAULT_FILTERS, FIRST_RES_FLOOR, INVENTORY, STATUS_META, TOP_FLOOR, TYPOLOGIES,
   fmtUSD, matches, type Filters, type Status, type TowerId, type Unit,
 } from '../data/units';
 import { fmtHour, useLocalSet } from '../lib/hooks';
-import { TowerScene } from '../three/TowerScene';
+import RealStage, { HIDDEN_FLOORS, type Focus } from './RealStage';
 import LeadModal from './LeadModal';
 import { PlanSVG, ViewSim, type ViewTime } from './ViewSim';
 
@@ -48,9 +48,8 @@ function DualRange({ min, max, lo, hi, onChange, fmt }: { min: number; max: numb
 }
 
 export default function Explorer({ params }: { params: URLSearchParams }) {
-  const stageRef = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<TowerScene | null>(null);
   const [ready, setReady] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 900);
 
   const initUnit = params.get('unidad');
   const [mode, setMode] = useState<Mode>((params.get('modo') as Mode) || (initUnit || params.get('piso') ? 'residencias' : 'resumen'));
@@ -84,32 +83,22 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
   const [showSaved, setShowSaved] = useState(false);
   const [lead, setLead] = useState<string | null | undefined>(undefined);
   const [hover, setHover] = useState<{ u: Unit; x: number; y: number } | null>(null);
-  const [labelPos, setLabelPos] = useState<{ x: number; y: number; visible: boolean } | null>(null);
 
   const unit = unitId ? byId.get(unitId)! : null;
 
-  // ------------------------------------------------------------- 3D scene
   useEffect(() => {
-    if (!stageRef.current) return;
-    const s = new TowerScene(stageRef.current, INVENTORY);
-    sceneRef.current = s;
-    if (window.innerWidth > 900) s.setFrameOffset(-0.12);
-    else s.setFrameOffset(0, 0.2);
-    s.onHover((u, x, y) => setHover(u ? { u, x, y } : null));
-    s.onPick((u) => {
-      if (!u) return;
-      setMode('residencias');
-      setFloorSel({ tower: u.tower, floor: u.floor });
-      setUnitId(u.id);
-      setUtab('resumen');
-    });
-    const t = setTimeout(() => setReady(true), 350);
-    return () => {
-      clearTimeout(t);
-      s.dispose();
-      sceneRef.current = null;
-    };
+    const t = setTimeout(() => setReady(true), 250);
+    const on = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener('resize', on);
+    return () => { clearTimeout(t); window.removeEventListener('resize', on); };
   }, []);
+
+  const pickUnit = (u: Unit) => {
+    setMode('residencias');
+    setFloorSel({ tower: u.tower, floor: u.floor });
+    setUnitId(u.id);
+    setUtab('resumen');
+  };
 
   const matching = useMemo(() => {
     const q = query.trim().toUpperCase();
@@ -117,45 +106,10 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
   }, [filters, query]);
   const matchSet = useMemo(() => new Set(matching.map((u) => u.id)), [matching]);
 
-  // colours
-  useEffect(() => {
-    const s = sceneRef.current;
-    if (!s) return;
-    if (mode === 'residencias' || mode === 'resumen') s.setColorFn((u) => (matchSet.has(u.id) ? STATUS_META[u.status].color : null));
-    else s.setColorFn(() => null);
-  }, [mode, matchSet]);
-
-  useEffect(() => sceneRef.current?.setSelected(unitId), [unitId]);
-  useEffect(() => sceneRef.current?.setHighlight(floorSel), [floorSel]);
-  useEffect(() => sceneRef.current?.setHour(hour), [hour]);
-
-  // camera choreography
-  useEffect(() => {
-    const s = sceneRef.current;
-    if (!s) return;
-    if (floorSel) s.focusFloor(floorSel.tower, floorSel.floor);
-    else s.focusTower(filters.tower);
-  }, [floorSel?.tower, floorSel?.floor, filters.tower]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (mode === 'sol') {
-      sceneRef.current?.setHighlight(null);
-      sceneRef.current?.focusOverview();
-    } else sceneRef.current?.setHighlight(floorSel);
-  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // track the big "PISO 24" label next to the selected floor
-  useEffect(() => {
-    if (!floorSel || mode !== 'residencias') return setLabelPos(null);
-    let raf = 0;
-    const tick = () => {
-      const s = sceneRef.current;
-      if (s) setLabelPos(s.floorLabelPos(floorSel.tower, floorSel.floor));
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [floorSel, mode]);
+  const colorFn = (u: Unit) =>
+    (mode === 'residencias' || mode === 'resumen') && matchSet.has(u.id) ? STATUS_META[u.status].color : null;
+  const focus: Focus = floorSel && mode === 'residencias' ? { tower: floorSel.tower, floor: floorSel.floor } : { tower: mode === 'sol' ? 'all' : filters.tower };
+  const [resetKey, setResetKey] = useState(0);
 
   // sun animation
   useEffect(() => {
@@ -368,7 +322,7 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
           <div className="ex-panel-h">
             <button className="back" onClick={() => setFloorSel(null)}>← Todas las residencias</button>
             <h2>Torre {floorSel.tower} · Piso {floorSel.floor}</h2>
-            <p>{av} de {list.length} disponibles · {list[0]?.perFloor} unidades por planta</p>
+            <p>{av} de {list.length} disponibles · {list[0]?.perFloor} unidades por planta{HIDDEN_FLOORS(floorSel.tower).includes(floorSel.floor) ? ' · nivel oculto tras el podio en la foto' : ''}</p>
           </div>
           <div className="ex-panel-b">
             <div className="ulist">
@@ -554,16 +508,25 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
 
   return (
     <div className="ex">
-      <div className="ex-stage" ref={stageRef} />
-      <div className={`ex-loading ${ready ? 'done' : ''}`}><span className="mono dot">Construyendo Macororó 16 | 17</span></div>
+      <div className="ex-stage">
+        <RealStage
+          key={resetKey}
+          units={INVENTORY}
+          colorFn={colorFn}
+          selectedId={unitId}
+          floorSel={mode === 'residencias' ? floorSel : null}
+          focus={focus}
+          hour={hour}
+          showSun={mode === 'sol'}
+          panelRight={isMobile ? 0 : 400}
+          panelBottom={isMobile ? Math.round(window.innerHeight * 0.46) + 70 : 0}
+          onPick={pickUnit}
+          onHover={(u, x, y) => setHover(u ? { u, x, y } : null)}
+        />
+      </div>
+      <div className={`ex-loading ${ready ? 'done' : ''}`}><span className="mono dot">Cargando Macororó 16 | 17</span></div>
 
       {stageOverlay}
-
-      {labelPos?.visible && floorSel && !stageOverlay && (
-        <div className="ex-big" style={{ left: labelPos.x + (floorSel.tower === '16' ? -90 : 90), top: labelPos.y, fontSize: 'clamp(40px, 6vw, 84px)' }}>
-          PISO <b>{String(floorSel.floor).padStart(2, '0')}</b>
-        </div>
-      )}
 
       {hover && !stageOverlay && (
         <div className="ex-tip" style={{ left: hover.x, top: hover.y }}>
@@ -604,8 +567,7 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
       </div>
 
       <div className="ex-zoom">
-        <button onClick={() => { setFloorSel(null); setUnitId(null); sceneRef.current?.focusOverview(); }} title="Vista general">⌂</button>
-        <button onClick={() => sceneRef.current?.setAutoRotate(true)} title="Girar">⟳</button>
+        <button onClick={() => { setFloorSel(null); setUnitId(null); setResetKey((k) => k + 1); }} title="Vista general">⌂</button>
       </div>
 
       <aside className="ex-panel" key={mode + (unitId || '') + (floorSel ? floorSel.tower + floorSel.floor : '')} style={{ animation: 'fade .3s' }}>
