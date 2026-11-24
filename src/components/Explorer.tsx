@@ -6,6 +6,7 @@ import {
 } from '../data/units';
 import { fmtHour, useLocalSet } from '../lib/hooks';
 import RealStage, { HIDDEN_FLOORS, type Focus } from './RealStage';
+import TwinStage from './TwinStage';
 import LeadModal from './LeadModal';
 import { PlanSVG, ViewSim, type ViewTime } from './ViewSim';
 
@@ -110,6 +111,8 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
     (mode === 'residencias' || mode === 'resumen') && matchSet.has(u.id) ? STATUS_META[u.status].color : null;
   const focus: Focus = floorSel && mode === 'residencias' ? { tower: floorSel.tower, floor: floorSel.floor } : { tower: mode === 'sol' ? 'all' : filters.tower };
   const [resetKey, setResetKey] = useState(0);
+  const [view, setView] = useState<'3d' | 'foto'>(params.get('vista') === 'foto' ? 'foto' : '3d');
+  const inside = mode === 'residencias' && !!unit && (utab === 'resumen' || utab === 'plano');
 
   // sun animation
   useEffect(() => {
@@ -509,20 +512,37 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
   return (
     <div className="ex">
       <div className="ex-stage">
-        <RealStage
-          key={resetKey}
-          units={INVENTORY}
-          colorFn={colorFn}
-          selectedId={unitId}
-          floorSel={mode === 'residencias' ? floorSel : null}
-          focus={focus}
-          hour={hour}
-          showSun={mode === 'sol'}
-          panelRight={isMobile ? 0 : 400}
-          panelBottom={isMobile ? Math.round(window.innerHeight * 0.46) + 70 : 0}
-          onPick={pickUnit}
-          onHover={(u, x, y) => setHover(u ? { u, x, y } : null)}
-        />
+        {view === '3d' ? (
+          <TwinStage
+            key={resetKey}
+            units={INVENTORY}
+            colorFn={colorFn}
+            selectedId={unitId}
+            floorSel={mode === 'residencias' ? floorSel : null}
+            focus={focus}
+            hour={hour}
+            inside={inside}
+            panelRight={isMobile ? 0 : 400}
+            panelBottom={isMobile ? Math.round(window.innerHeight * 0.46) + 70 : 0}
+            onPick={pickUnit}
+            onHover={(u, x, y) => setHover(u ? { u, x, y } : null)}
+          />
+        ) : (
+          <RealStage
+            key={resetKey}
+            units={INVENTORY}
+            colorFn={colorFn}
+            selectedId={unitId}
+            floorSel={mode === 'residencias' ? floorSel : null}
+            focus={focus}
+            hour={hour}
+            showSun={mode === 'sol'}
+            panelRight={isMobile ? 0 : 400}
+            panelBottom={isMobile ? Math.round(window.innerHeight * 0.46) + 70 : 0}
+            onPick={pickUnit}
+            onHover={(u, x, y) => setHover(u ? { u, x, y } : null)}
+          />
+        )}
       </div>
       <div className={`ex-loading ${ready ? 'done' : ''}`}><span className="mono dot">Cargando Macororó 16 | 17</span></div>
 
@@ -552,6 +572,10 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
           <span className="logo">M</span>
           <span><div className="t1">Macororó 16 | 17</div><div className="t2">City Park · Av. Beni</div></span>
         </a>
+        <div className="pill seg">
+          <button className={view === '3d' ? 'on' : ''} onClick={() => setView('3d')}>3D</button>
+          <button className={view === 'foto' ? 'on' : ''} onClick={() => setView('foto')}>Foto real</button>
+        </div>
         <div className="pill seg">
           {(['all', '16', '17'] as const).map((t) => (
             <button key={t} className={filters.tower === t ? 'on' : ''} onClick={() => setTower(t)}>{t === 'all' ? 'Todas' : `Torre ${t}`}</button>
