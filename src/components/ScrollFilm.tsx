@@ -38,7 +38,6 @@ export default function ScrollFilm({ onVisit }: { onVisit: () => void }) {
   const target = useRef(0);
   const current = useRef(0);
   const drawn = useRef(-1);
-  const [frame, setFrame] = useState(0);
   const [loaded, setLoaded] = useState(0);
 
   const counts = useMemo(() => {
@@ -79,64 +78,94 @@ export default function ScrollFilm({ onVisit }: { onVisit: () => void }) {
     };
   }, []);
 
+  const copyRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLElement>(null);
+  const clockRef = useRef<HTMLSpanElement>(null);
+  const [ci, setCi] = useState(0);
+  const ciRef = useRef(0);
+  const [started, setStarted] = useState(false);
+
   useEffect(() => {
-    const onScroll = () => {
+    let raf = 0;
+    let lastDrawn = -1;
+    let lastBg = -1;
+    const fit = (c: HTMLCanvasElement, dpr: number) => {
+      const w = Math.round(c.clientWidth * dpr);
+      const h = Math.round(c.clientHeight * dpr);
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; lastDrawn = -1; }
+    };
+    const paint = (ctx: CanvasRenderingContext2D, c: HTMLCanvasElement, im: HTMLImageElement, alpha: number) => {
+      const sc = Math.max(c.width / im.width, c.height / im.height);
+      const dw = im.width * sc;
+      const dh = im.height * sc;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(im, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
+    };
+    const nearest = (i: number) => {
+      for (let d = 0; d < FRAMES; d++) {
+        if (imgs.current[i - d]) return i - d;
+        if (imgs.current[i + d]) return i + d;
+      }
+      return -1;
+    };
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
       const el = wrap.current;
-      if (!el) return;
+      const c = canvas.current;
+      if (!el || !c) return;
       const r = el.getBoundingClientRect();
+      if (r.bottom < -50 || r.top > window.innerHeight + 50) return; // offscreen: idle
       const total = r.height - window.innerHeight;
       const p = Math.min(1, Math.max(0, -r.top / total));
       target.current = p * (FRAMES - 1);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
+      current.current += (target.current - current.current) * 0.2;
+      if (Math.abs(target.current - current.current) < 0.002) current.current = target.current;
+      const fp = current.current;
 
-    let raf = 0;
-    const draw = () => {
-      raf = requestAnimationFrame(draw);
-      current.current += (target.current - current.current) * 0.16;
-      const want = Math.round(current.current);
-      // nearest loaded frame
-      let i = want;
-      for (let d = 0; d < FRAMES; d++) {
-        if (imgs.current[want - d]) { i = want - d; break; }
-        if (imgs.current[want + d]) { i = want + d; break; }
+      // chapter + overlays (DOM writes; React only re-renders when the chapter changes)
+      let k = CHAPTERS.findIndex((ch) => fp >= ch.from && fp < ch.to);
+      if (k < 0) k = CHAPTERS.length - 1;
+      if (k !== ciRef.current) { ciRef.current = k; setCi(k); }
+      const ch = CHAPTERS[k];
+      const local = (fp - ch.from) / (ch.to - ch.from);
+      const vis = Math.max(0, Math.min(1, k === 0 ? 1 : local / 0.12, k === CHAPTERS.length - 1 ? 1 : (1 - local) / 0.12));
+      if (copyRef.current) {
+        copyRef.current.style.opacity = String(vis);
+        copyRef.current.style.transform = `translate3d(0, ${(1 - vis) * 24}px, 0)`;
       }
-      const im = imgs.current[i];
-      if (!im || i === drawn.current) return;
-      drawn.current = i;
-      for (const c of [canvas.current, bg.current]) {
-        if (!c) continue;
-        const dpr = c === bg.current ? 0.25 : Math.min(window.devicePixelRatio, 2);
-        const w = c.clientWidth * dpr;
-        const h = c.clientHeight * dpr;
-        if (c.width !== Math.round(w) || c.height !== Math.round(h)) {
-          c.width = Math.round(w);
-          c.height = Math.round(h);
-        }
-        const ctx = c.getContext('2d')!;
-        const s = Math.max(c.width / im.width, c.height / im.height);
-        const dw = im.width * s;
-        const dh = im.height * s;
-        ctx.drawImage(im, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
+      if (barRef.current) barRef.current.style.transform = `scaleX(${fp / (FRAMES - 1)})`;
+      if (clockRef.current) {
+        const sec = Math.floor(fp / 4);
+        clockRef.current.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
       }
-      setFrame(i);
-    };
-    raf = requestAnimationFrame(draw);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-    };
-  }, []);
+      if (fp > 1 && !started) setStarted(true);
 
-  const f = frame;
-  const ci = Math.max(0, CHAPTERS.findIndex((c) => f >= c.from && f < c.to));
-  const ch = CHAPTERS[ci === -1 ? CHAPTERS.length - 1 : ci];
-  const local = (f - ch.from) / (ch.to - ch.from);
-  const vis = Math.min(1, ci === 0 ? 1 : local / 0.12, ci === CHAPTERS.length - 1 ? 1 : (1 - local) / 0.12);
-  const progress = f / (FRAMES - 1);
+      // frames: cross-fade between the two neighbouring stills for fluid motion
+      if (Math.abs(fp - lastDrawn) < 0.004) return;
+      fit(c, Math.min(window.devicePixelRatio, 2));
+      const a = Math.floor(fp);
+      const ia = nearest(a);
+      if (ia < 0) return;
+      const ctx = c.getContext('2d')!;
+      paint(ctx, c, imgs.current[ia]!, 1);
+      const frac = fp - a;
+      const ib = a + 1 < FRAMES && imgs.current[a + 1] ? a + 1 : -1;
+      if (ib >= 0 && ia === a && frac > 0.01) paint(ctx, c, imgs.current[ib]!, frac);
+      ctx.globalAlpha = 1;
+      lastDrawn = fp;
+      // blurred ambience: low-res, refreshed sparingly
+      const bc = bg.current;
+      if (bc && (Math.abs(ia - lastBg) >= 3 || lastBg < 0)) {
+        fit(bc, 0.2);
+        paint(bc.getContext('2d')!, bc, imgs.current[ia]!, 1);
+        lastBg = ia;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [loaded > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ch = CHAPTERS[ci];
 
   return (
     <section className="film" ref={wrap} style={{ height: `${CHAPTERS.length * 115 + 100}vh` }}>
@@ -146,12 +175,12 @@ export default function ScrollFilm({ onVisit }: { onVisit: () => void }) {
           <canvas ref={canvas} aria-label="Vuelo de drone alrededor de Macororó 16 | 17" />
           <div className="film-screen-ui mono">
             <span className="dot">En vivo · drone</span>
-            <span>{String(Math.floor((f / 4) / 60))}:{String(Math.floor((f / 4) % 60)).padStart(2, '0')}</span>
+            <span ref={clockRef}>0:00</span>
           </div>
           {loaded < FRAMES && <div className="film-loading" style={{ width: `${(loaded / FRAMES) * 100}%` }} />}
         </div>
 
-        <div className="film-copy" key={ci} style={{ opacity: Math.max(0, vis), transform: `translateY(${(1 - Math.max(0, Math.min(1, vis))) * 24}px)` }}>
+        <div className="film-copy" key={ci} ref={copyRef}>
           <div className="mono dot film-eyebrow">{ch.eyebrow}</div>
           <h2 className="display film-h">
             <span>{ch.l1}</span>
@@ -212,8 +241,8 @@ export default function ScrollFilm({ onVisit }: { onVisit: () => void }) {
           <div className="film-count display">
             {String(ci + 1).padStart(2, '0')}<small>/{String(CHAPTERS.length).padStart(2, '0')}</small>
           </div>
-          <div className="film-bar"><i style={{ width: `${progress * 100}%` }} /></div>
-          <div className="mono film-hint">{progress < 0.02 ? 'Deslizá para volar ↓' : ch.eyebrow}</div>
+          <div className="film-bar"><i ref={barRef as React.RefObject<HTMLElement>} /></div>
+          <div className="mono film-hint">{!started ? 'Deslizá para volar ↓' : ch.eyebrow}</div>
         </div>
       </div>
     </section>

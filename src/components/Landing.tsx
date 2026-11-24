@@ -4,8 +4,16 @@ import { INVENTORY, TYPOLOGIES, fmtUSD, type Typology } from '../data/units';
 import { useCountUp, useInView } from '../lib/hooks';
 import LeadModal, { LeadForm } from './LeadModal';
 import ScrollFilm from './ScrollFilm';
+import ScrollTwin from './ScrollTwin';
+import Lenis from 'lenis';
 
-const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+let lenis: Lenis | null = null;
+const scrollTo = (id: string) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (lenis) lenis.scrollTo(el, { duration: 1.4 });
+  else el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
 function Reveal({ children, delay = 0, className = '' }: { children: React.ReactNode; delay?: number; className?: string }) {
   const [ref, seen] = useInView<HTMLDivElement>();
@@ -32,6 +40,17 @@ export default function Landing() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [place, setPlace] = useState(NEARBY[0].id);
   const [statsRef, statsSeen] = useInView<HTMLDivElement>(0.3);
+
+  // momentum smooth scrolling (desktop wheel/trackpad; native touch scrolling stays on phones)
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const l = new Lenis({ lerp: 0.085, wheelMultiplier: 0.9, smoothWheel: true });
+    lenis = l;
+    let raf = 0;
+    const loop = (t: number) => { l.raf(t); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); l.destroy(); lenis = null; };
+  }, []);
 
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 40);
@@ -71,6 +90,7 @@ export default function Landing() {
       </nav>
 
       <ScrollFilm onVisit={() => setLead(true)} />
+      <ScrollTwin />
 
       {/* TYPOLOGIES */}
       <section className="section" id="s-deptos" style={{ background: 'var(--ink-2)' }}>

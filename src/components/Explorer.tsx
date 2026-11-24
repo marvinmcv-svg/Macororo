@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AMENITIES, M, NEARBY, ORIGIN_PIN, PROJECT, waLink } from '../data/project';
 import {
   DEFAULT_FILTERS, FIRST_RES_FLOOR, INVENTORY, STATUS_META, TOP_FLOOR, TYPOLOGIES,
@@ -93,6 +93,20 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
     window.addEventListener('resize', on);
     return () => { clearTimeout(t); window.removeEventListener('resize', on); };
   }, []);
+
+  // hover: re-render only when the hovered unit changes; the tooltip follows the pointer via direct DOM writes
+  const tipRef = useRef<HTMLDivElement>(null);
+  const hoverId = useRef<string | null>(null);
+  const onStageHover = (u: Unit | null, x: number, y: number) => {
+    if ((u?.id ?? null) !== hoverId.current) {
+      hoverId.current = u?.id ?? null;
+      setHover(u ? { u, x, y } : null);
+    }
+    if (tipRef.current) {
+      tipRef.current.style.left = `${x}px`;
+      tipRef.current.style.top = `${y}px`;
+    }
+  };
 
   const pickUnit = (u: Unit) => {
     setMode('residencias');
@@ -525,7 +539,7 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
             panelRight={isMobile ? 0 : 400}
             panelBottom={isMobile ? Math.round(window.innerHeight * 0.46) + 70 : 0}
             onPick={pickUnit}
-            onHover={(u, x, y) => setHover(u ? { u, x, y } : null)}
+            onHover={onStageHover}
           />
         ) : (
           <RealStage
@@ -540,7 +554,7 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
             panelRight={isMobile ? 0 : 400}
             panelBottom={isMobile ? Math.round(window.innerHeight * 0.46) + 70 : 0}
             onPick={pickUnit}
-            onHover={(u, x, y) => setHover(u ? { u, x, y } : null)}
+            onHover={onStageHover}
           />
         )}
       </div>
@@ -549,7 +563,7 @@ export default function Explorer({ params }: { params: URLSearchParams }) {
       {stageOverlay}
 
       {hover && !stageOverlay && (
-        <div className="ex-tip" style={{ left: hover.x, top: hover.y }}>
+        <div className="ex-tip" ref={tipRef} style={{ left: hover.x, top: hover.y }}>
           <b>{hover.u.id}</b> <span style={{ color: STATUS_META[hover.u.status].color, fontWeight: 700, fontSize: 11 }}>● {STATUS_META[hover.u.status].label}</span>
           <div>{TYPOLOGIES[hover.u.dorms].label} · {hover.u.area} m² · Piso {hover.u.floor}</div>
           {hover.u.status !== 'vendido' && <div style={{ color: 'var(--text)', fontWeight: 700 }}>{fmtUSD(hover.u.price)}</div>}

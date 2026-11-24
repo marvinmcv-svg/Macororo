@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { STATUS_META, TYPOLOGIES, type TowerId, type Unit } from '../data/units';
 import type { Twin } from '../three/Twin';
 import type { Focus } from './RealStage';
@@ -22,8 +22,8 @@ export default function TwinStage({ units, colorFn, selectedId, floorSel, focus,
   const ref = useRef<HTMLDivElement>(null);
   const twin = useRef<Twin | null>(null);
   const [ok, setOk] = useState(false);
-  const [label, setLabel] = useState<{ x: number; y: number; visible: boolean } | null>(null);
-  const [labels, setLabels] = useState<{ u: Unit; x: number; y: number; visible: boolean }[]>([]);
+  const floorLabel = useRef<HTMLDivElement>(null);
+  const tagRefs = useRef(new Map<string, HTMLButtonElement>());
   const cb = useRef({ onPick, onHover, colorFn });
   cb.current = { onPick, onHover, colorFn };
 
@@ -46,11 +46,11 @@ export default function TwinStage({ units, colorFn, selectedId, floorSel, focus,
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const w = ref.current?.clientWidth || window.innerWidth;
-  const h = ref.current?.clientHeight || window.innerHeight;
   useEffect(() => {
-    twin.current?.setFrameOffset(-(panelRight / 2) / w, panelBottom ? (panelBottom / 2) / h : 0);
-  }, [ok, panelRight, panelBottom, w, h]);
+    const w = ref.current?.clientWidth || window.innerWidth;
+    const h = ref.current?.clientHeight || window.innerHeight;
+    twin.current?.setFrameOffset(-(panelRight / 2) / w, panelBottom ? panelBottom / 2 / h : 0);
+  }, [ok, panelRight, panelBottom]);
 
   useEffect(() => { if (ok) twin.current!.setColorFn((u) => cb.current.colorFn(u)); }, [ok, colorFn]);
   useEffect(() => { if (ok) twin.current!.setSelected(selectedId ?? null); }, [ok, selectedId]);
@@ -71,40 +71,48 @@ export default function TwinStage({ units, colorFn, selectedId, floorSel, focus,
     }
   }, [ok, inside, focus.tower, focus.floor, floorSel?.tower, floorSel?.floor]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // HTML labels tracking the 3D
+  const dollUnits = useMemo(
+    () => (inside && floorSel ? units.filter((u) => u.tower === floorSel.tower && u.floor === floorSel.floor) : []),
+    [inside, floorSel?.tower, floorSel?.floor, units], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // labels follow the 3D via direct DOM writes after each rendered frame — no React re-render per frame
   useEffect(() => {
-    if (!ok) return;
-    let raf = 0;
-    const tick = () => {
-      const t = twin.current;
-      if (t) {
-        if (floorSel && !inside) setLabel(t.floorLabelPos(floorSel.tower, floorSel.floor));
-        else setLabel(null);
-        setLabels(inside ? t.dollLabels() : []);
-      }
-      raf = requestAnimationFrame(tick);
+    const t = twin.current;
+    if (!ok || !t) return;
+    const place = (el: HTMLElement | null | undefined, p: { x: number; y: number; visible: boolean } | null) => {
+      if (!el) return;
+      if (!p || !p.visible) { el.style.visibility = 'hidden'; return; }
+      el.style.visibility = 'visible';
+      el.style.left = `${p.x}px`;
+      el.style.top = `${p.y}px`;
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    t.onFrame(() => {
+      place(floorLabel.current, floorSel && !inside ? t.floorLabelPos(floorSel.tower, floorSel.floor) : null);
+      if (inside) for (const l of t.dollLabels()) place(tagRefs.current.get(l.u.id), l);
+    });
+    t.invalidate(); // force a frame so labels settle immediately
+    return () => t.onFrame(null);
   }, [ok, floorSel, inside]);
 
   return (
     <div className="twin" ref={ref}>
-      {label?.visible && floorSel && (
-        <div className={`ex-big ${floorSel.tower === '16' ? 'left' : 'right'}`} style={{ left: label.x, top: label.y }}>
+      {floorSel && !inside && (
+        <div ref={floorLabel} className={`ex-big ${floorSel.tower === '16' ? 'left' : 'right'}`} style={{ visibility: 'hidden' }}>
           PISO <b>{String(floorSel.floor).padStart(2, '0')}</b>
         </div>
       )}
-      {labels.filter((l) => l.visible).map((l) => (
+      {dollUnits.map((u) => (
         <button
-          key={l.u.id}
-          className={`doll-tag ${l.u.id === selectedId ? 'on' : ''}`}
-          style={{ left: l.x, top: l.y }}
-          onClick={() => onPick?.(l.u)}
+          key={u.id}
+          ref={(el) => { if (el) tagRefs.current.set(u.id, el); else tagRefs.current.delete(u.id); }}
+          className={`doll-tag ${u.id === selectedId ? 'on' : ''}`}
+          style={{ visibility: 'hidden' }}
+          onClick={() => onPick?.(u)}
         >
-          <i style={{ background: STATUS_META[l.u.status].color }} />
-          {l.u.id} · {TYPOLOGIES[l.u.dorms].short}
-          <small>{l.u.area} m²</small>
+          <i style={{ background: STATUS_META[u.status].color }} />
+          {u.id} · {TYPOLOGIES[u.dorms].short}
+          <small>{u.area} m²</small>
         </button>
       ))}
     </div>

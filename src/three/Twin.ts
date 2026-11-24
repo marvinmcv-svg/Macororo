@@ -2,10 +2,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { BRIDGE_FLOOR, FIRST_RES_FLOOR, TOP_FLOOR, type TowerId, type Unit } from '../data/units';
 
 /**
@@ -158,6 +154,7 @@ type TowerParts = {
   faceUnit: Int32Array;
   vertUnit: Int32Array;
   vertTint: Float32Array;
+  unitVerts: Map<number, number[]>;
   clip: THREE.Plane;
 };
 
@@ -166,8 +163,6 @@ export class Twin {
   private scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
-  private composer: EffectComposer;
-  private gtao: GTAOPass;
   private container: HTMLElement;
   private ro: ResizeObserver;
   private raf = 0;
@@ -202,6 +197,15 @@ export class Twin {
   private hoverCb: HoverHandler = () => {};
   private fly: { a: THREE.Vector3; b: THREE.Vector3; ta: THREE.Vector3; tb: THREE.Vector3; t: number; d: number } | null = null;
   private offset = { x: 0, y: 0 };
+  private dirty = true;
+  private visible = true;
+  private io: IntersectionObserver;
+  private envTimer = 0;
+  private pendingMove: PointerEvent | null = null;
+  private frameCb: (() => void) | null = null;
+  private C = { base: new THREE.Color('#ffffff'), warm: new THREE.Color('#ffc887'), dim: new THREE.Color('#5d6670'), white: new THREE.Color('#ffffff'), tmp: new THREE.Color() };
+  private unitColor = new Map<number, THREE.Color | null>();
+  private anyStatus = false;
 
   constructor(container: HTMLElement, units: Unit[]) {
     this.container = container;
@@ -210,10 +214,11 @@ export class Twin {
     const h = container.clientHeight || 600;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, window.matchMedia('(pointer: coarse)').matches ? 1.3 : 1.5));
     this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false; // static scene: only re-bake when the sun or cutaway changes
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.62;
     this.renderer.localClippingEnabled = true;
@@ -231,6 +236,7 @@ export class Twin {
     this.controls.maxPolarAngle = Math.PI * 0.49;
     this.controls.autoRotateSpeed = 0.35;
     this.controls.addEventListener('start', () => (this.fly = null));
+    this.controls.addEventListener('change', () => (this.dirty = true));
 
     this.pmrem = new THREE.PMREMGenerator(this.renderer);
 
@@ -247,7 +253,7 @@ export class Twin {
 
     this.sun.castShadow = true;
     const lowPower = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900;
-    this.sun.shadow.mapSize.set(lowPower ? 2048 : 4096, lowPower ? 2048 : 4096);
+    this.sun.shadow.mapSize.set(lowPower ? 1536 : 3072, lowPower ? 1536 : 3072);
     const sc = this.sun.shadow.camera;
     sc.left = -110; sc.right = 110; sc.top = 140; sc.bottom = -60; sc.near = 10; sc.far = 700;
     this.sun.shadow.bias = -0.0004;
@@ -266,16 +272,6 @@ export class Twin {
     this.hlRing.visible = false;
     this.scene.add(this.hlRing);
 
-    // post: AO gives the facade its depth
-    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 });
-    this.composer = new EffectComposer(this.renderer, rt);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.gtao = new GTAOPass(this.scene, this.camera, w, h);
-    this.gtao.output = GTAOPass.OUTPUT.Default;
-    this.gtao.blendIntensity = 0.85;
-    this.gtao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.6, thickness: 2, scale: 1.2, samples: 12 });
-    if (!lowPower && !/ao=0/.test(window.location.hash)) this.composer.addPass(this.gtao);
-    this.composer.addPass(new OutputPass());
 
     this.setHour(this.hour);
 
@@ -284,6 +280,8 @@ export class Twin {
     el.addEventListener('pointerdown', this.onDown);
     el.addEventListener('pointerup', this.onUp);
     el.addEventListener('pointerleave', () => this.setHover(-1, 0, 0));
+    this.io = new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; this.dirty = true; });
+    this.io.observe(container);
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
     this.loop();
@@ -354,7 +352,7 @@ export class Twin {
         if (Math.abs(cx) < 140 && Math.abs(cz) < 110) continue; // keep the site clear
         const dist = Math.hypot(cx, cz);
         if (dist > 1300) continue;
-        if (rnd() < 0.12 && nt < 120 && dist < 900) {
+        if (rnd() < 0.12 && nt < 120 && dist > 520 && dist < 1100) {
           const hgt = 25 + rnd() * 55;
           m.compose(new THREE.Vector3(cx, 0, cz), q, new THREE.Vector3(18 + rnd() * 10, hgt, 16 + rnd() * 10));
           towersM.setMatrixAt(nt++, m);
@@ -540,7 +538,14 @@ export class Twin {
       const v = s / 2147483647;
       for (let k = 0; k < 6; k++) tint[i + k] = v;
     }
-    return { glass: glassMesh, slab: slabMesh, rail: railMesh, faceUnit: fu, vertUnit: vu, vertTint: tint, clip };
+    const unitVerts = new Map<number, number[]>();
+    for (let v = 0; v < vu.length; v++) {
+      if (vu[v] < 0) continue;
+      let l = unitVerts.get(vu[v]);
+      if (!l) unitVerts.set(vu[v], (l = []));
+      l.push(v);
+    }
+    return { glass: glassMesh, slab: slabMesh, rail: railMesh, faceUnit: fu, vertUnit: vu, vertTint: tint, unitVerts, clip };
   }
 
   private buildBridge() {
@@ -611,6 +616,8 @@ export class Twin {
     });
     this.hlRing.visible = !!this.hl && !c;
     this.buildDoll();
+    this.renderer.shadowMap.needsUpdate = true;
+    this.dirty = true;
   }
 
   setHour(h: number) {
@@ -643,9 +650,16 @@ export class Twin {
     const su = s2.material.uniforms;
     su.turbidity.value = 2.4; su.rayleigh.value = 2.1; su.mieCoefficient.value = 0.004; su.mieDirectionalG.value = 0.82;
     su.sunPosition.value.copy(day ? dir : new THREE.Vector3(0, 0.05, -1));
-    this.envRT?.dispose();
-    this.envRT = this.pmrem.fromScene(this.skyScene, 0.02);
-    this.scene.environment = this.envRT.texture;
+    const bake = () => {
+      this.envRT?.dispose();
+      this.envRT = this.pmrem.fromScene(this.skyScene, 0.02);
+      this.scene.environment = this.envRT.texture;
+      this.dirty = true;
+    };
+    clearTimeout(this.envTimer);
+    if (!this.envRT) bake();
+    else this.envTimer = window.setTimeout(bake, 140);
+    this.renderer.shadowMap.needsUpdate = true;
     this.scene.environmentIntensity = day ? 0.32 : 0.08;
     this.refresh();
   }
@@ -696,7 +710,8 @@ export class Twin {
     this.scene.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
     this.envRT?.dispose();
     this.pmrem.dispose();
-    this.composer.dispose();
+    this.io.disconnect();
+    clearTimeout(this.envTimer);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -773,6 +788,7 @@ export class Twin {
   }
 
   private refreshDoll() {
+    this.dirty = true;
     this.dollFills.forEach((m, id) => {
       const u = m.userData.unit as Unit;
       const c = this.colorFn(u) || '#d9d6cf';
@@ -783,50 +799,51 @@ export class Twin {
     });
   }
 
-  refresh() {
+  private paintUnitVerts(parts: TowerParts, arr: Float32Array, v: number, ui: number) {
+    const { base, warm, dim, white, tmp } = this.C;
     const night = this.glow;
-    const base = new THREE.Color('#ffffff');
-    const warm = new THREE.Color('#ffc887');
-    const dim = new THREE.Color('#5d6670');
-    const tmp = new THREE.Color();
-    let anyStatus = false;
-    const cache = new Map<number, THREE.Color | null>();
+    if (ui < 0) {
+      tmp.copy(base).lerp(warm, night * 0.6);
+    } else {
+      const c = this.unitColor.get(ui) ?? null;
+      const u = this.units[ui];
+      const inHl = !this.hl || (u.tower === this.hl.tower && u.floor === this.hl.floor);
+      if (c) {
+        tmp.copy(c);
+        if (!inHl) tmp.lerp(dim, 0.75);
+      } else {
+        tmp.copy(base);
+        if (night > 0 && parts.vertTint[v] < 0.6) tmp.lerp(warm, night);
+        if (this.hl && !inHl) tmp.lerp(dim, 0.4);
+      }
+      if (ui === this.hoverIdx) tmp.lerp(white, 0.5);
+      if (u.id === this.selectedId) tmp.copy(white);
+    }
+    arr[v * 3] = tmp.r;
+    arr[v * 3 + 1] = tmp.g;
+    arr[v * 3 + 2] = tmp.b;
+  }
+
+  /** Full recolour (filters, hour, highlight changes). */
+  refresh() {
+    this.unitColor.clear();
+    this.anyStatus = false;
+    this.units.forEach((u, i) => {
+      const hex = this.colorFn(u);
+      const c = hex ? new THREE.Color(hex) : null;
+      if (c) this.anyStatus = true;
+      this.unitColor.set(i, c);
+    });
     (['16', '17'] as TowerId[]).forEach((t) => {
       const parts = this.towers[t];
       if (!parts) return;
       const col = parts.glass.geometry.getAttribute('color') as THREE.BufferAttribute;
       const arr = col.array as Float32Array;
-      for (let v = 0; v < parts.vertUnit.length; v++) {
-        const ui = parts.vertUnit[v];
-        if (ui < 0) {
-          tmp.copy(base).lerp(warm, night * 0.6);
-        } else {
-          let c = cache.get(ui);
-          if (c === undefined) {
-            const hex = this.colorFn(this.units[ui]);
-            c = hex ? new THREE.Color(hex) : null;
-            cache.set(ui, c);
-          }
-          if (c) anyStatus = true;
-          const u = this.units[ui];
-          const inHl = !this.hl || (u.tower === this.hl.tower && u.floor === this.hl.floor);
-          if (c) {
-            tmp.copy(c);
-            if (!inHl) tmp.lerp(dim, 0.75);
-          } else {
-            tmp.copy(base);
-            if (night > 0 && parts.vertTint[v] < 0.6) tmp.lerp(warm, night);
-            if (this.hl && !inHl) tmp.lerp(dim, 0.4);
-          }
-          if (ui === this.hoverIdx) tmp.lerp(new THREE.Color('#ffffff'), 0.5);
-          if (u.id === this.selectedId) tmp.set('#ffffff');
-        }
-        arr[v * 3] = tmp.r;
-        arr[v * 3 + 1] = tmp.g;
-        arr[v * 3 + 2] = tmp.b;
-      }
+      for (let v = 0; v < parts.vertUnit.length; v++) this.paintUnitVerts(parts, arr, v, parts.vertUnit[v]);
       col.needsUpdate = true;
     });
+    const anyStatus = this.anyStatus;
+    const night = this.glow;
     for (const m of this.glassMats) {
       const sh = m.userData.sh as { uniforms: { uGlow: { value: number } } } | undefined;
       if (sh) sh.uniforms.uGlow.value = anyStatus ? 0.35 + night * 0.5 : night * 1.1;
@@ -838,8 +855,46 @@ export class Twin {
       m.roughness = anyStatus ? 0.55 : 0.1;
       m.clearcoat = anyStatus ? 0 : 0.6;
       m.envMapIntensity = anyStatus ? 0.2 : 1.6;
-      m.color.set(anyStatus ? '#ffffff' : '#ffffff');
     }
+    this.dirty = true;
+  }
+
+  /** Cheap recolour of just a few units (hover). */
+  private refreshUnits(list: number[]) {
+    for (const ui of list) {
+      if (ui < 0) continue;
+      const t = this.units[ui].tower;
+      const parts = this.towers[t];
+      const verts = parts.unitVerts.get(ui);
+      if (!verts) continue;
+      const col = parts.glass.geometry.getAttribute('color') as THREE.BufferAttribute;
+      const arr = col.array as Float32Array;
+      for (const v of verts) this.paintUnitVerts(parts, arr, v, ui);
+      col.needsUpdate = true;
+    }
+    this.dirty = true;
+  }
+
+  /** Called after each rendered frame (for HTML labels that track the 3D). */
+  onFrame(cb: (() => void) | null) {
+    this.frameCb = cb;
+  }
+
+  /** Direct camera pose (scroll-driven sequences). */
+  setPose(pos: THREE.Vector3Like, target: THREE.Vector3Like) {
+    this.fly = null;
+    this.camera.position.set(pos.x, pos.y, pos.z);
+    this.controls.target.set(target.x, target.y, target.z);
+    this.dirty = true;
+  }
+
+  invalidate() {
+    this.dirty = true;
+  }
+
+  setControlsEnabled(on: boolean) {
+    this.controls.enabled = on;
+    this.renderer.domElement.style.touchAction = on ? 'none' : 'pan-y';
   }
 
   private pick(e: PointerEvent) {
@@ -861,16 +916,16 @@ export class Twin {
 
   private setHover(i: number, x: number, y: number) {
     if (i !== this.hoverIdx) {
+      const prev = this.hoverIdx;
       this.hoverIdx = i;
-      this.refresh();
+      this.refreshUnits([prev, i]);
       this.renderer.domElement.style.cursor = i >= 0 ? 'pointer' : 'grab';
     }
     this.hoverCb(i >= 0 ? this.units[i] : null, x, y);
   }
   private onMove = (e: PointerEvent) => {
     if (e.buttons) return;
-    const r = this.renderer.domElement.getBoundingClientRect();
-    this.setHover(this.pick(e), e.clientX - r.left, e.clientY - r.top);
+    this.pendingMove = e; // resolved once per frame in the loop
   };
   private onDown = (e: PointerEvent) => (this.down = { x: e.clientX, y: e.clientY, t: performance.now() });
   private onUp = (e: PointerEvent) => {
@@ -888,12 +943,12 @@ export class Twin {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
-    this.composer.setSize(w, h);
-    this.gtao.setSize(w, h);
+    this.dirty = true;
   }
 
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
+    if (!this.visible) return;
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.fly) {
       this.fly.t += dt / this.fly.d;
@@ -901,8 +956,19 @@ export class Twin {
       this.camera.position.lerpVectors(this.fly.a, this.fly.b, k);
       this.controls.target.lerpVectors(this.fly.ta, this.fly.tb, k);
       if (this.fly.t >= 1) this.fly = null;
+      this.dirty = true;
     }
-    this.controls.update();
-    this.composer.render();
+    if (this.controls.enabled || this.controls.autoRotate) this.controls.update();
+    else this.camera.lookAt(this.controls.target);
+    if (this.pendingMove) {
+      const e = this.pendingMove;
+      this.pendingMove = null;
+      const r = this.renderer.domElement.getBoundingClientRect();
+      this.setHover(this.pick(e), e.clientX - r.left, e.clientY - r.top);
+    }
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.renderer.render(this.scene, this.camera);
+    this.frameCb?.();
   };
 }
